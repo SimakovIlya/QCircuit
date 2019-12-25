@@ -300,6 +300,8 @@ class qubit_device:
 
         self.awg_channels.update(extra_channels)
         self.pg = pulses.pulses(self.awg_channels)
+        self.pg.set_initial_delay(float(self.get_sample_global('pg_initial_delay')))
+        self.pg.set_final_delay(float(self.get_sample_global('pg_final_delay')))
         self.update_pulsed_frequencies()
 
     def update_pulsed_frequencies(self):

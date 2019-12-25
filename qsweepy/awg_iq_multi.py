@@ -148,6 +148,7 @@ class Awg_iq_multi:
         self.use_offset_I = hasattr(self.awg_I, 'set_offset')  # set DC offsets by set_offset
         self.use_offset_Q = hasattr(self.awg_Q, 'set_offset')
         self.calibration_switch_setter = lambda: None
+        self.no_calibration = False
 
     def get_physical_devices(self):
         if self.awg_I != self.awg_Q:
@@ -340,12 +341,9 @@ class Awg_iq_multi:
                         self.dc_calibrations[self.dc_cname()][k] = complex(v)
         #self.dc_calibrations[self.dc_cname()] = qjson.load(type='iq-dc',name=self.dc_cname())
         except Exception as e:
-            if not sa:
-                logging.error('No ready calibration found and no spectrum analyzer to calibrate')
-            else:
-                print (type(e), e)
-                self._calibrate_zero_sa(sa)
-                self.save_dc_calibration()
+            print (type(e), e)
+            self._calibrate_zero_sa(sa)
+            self.save_dc_calibration()
         return self.dc_calibrations[self.dc_cname()]
 
     def save_dc_calibration(self):
@@ -381,12 +379,9 @@ class Awg_iq_multi:
         #self.rf_calibrations[self.rf_cname(carrier)] = qjson.load(type='iq-rf',name=self.rf_cname(carrier))
         #self.rf_calibrations[self.rf_cname(carrier)] = load_pkl(filename, location=calibration_path)
         except Exception as e:
-            if not sa:
-                logging.error('No ready calibration found and no spectrum analyzer to calibrate')
-            else:
-                print (e)
-                self._calibrate_cw_sa(sa, carrier)
-                self.save_rf_calibration(carrier)
+            print (e)
+            self._calibrate_cw_sa(sa, carrier)
+            self.save_rf_calibration(carrier)
         return self.rf_calibrations[self.rf_cname(carrier)]
 
     def save_rf_calibration(self, carrier):
@@ -422,96 +417,100 @@ class Awg_iq_multi:
 
     def _calibrate_cw_sa(self, sa, carrier, num_sidebands = 3, use_central = False, num_sidebands_final = 9, half_length = True, use_single_sweep=False):
         """Performs IQ mixer calibration with the spectrum analyzer sa with the intermediate frequency."""
-        from scipy.optimize import fmin
-        #import time
-        res_bw = 4e6
-        video_bw = 1e3
-
-        self.calibration_switch_setter()
-
-        if hasattr(sa, 'set_nop') and use_single_sweep:
-            sa.set_centerfreq(self.lo.get_frequency())
-            sa.set_span((num_sidebands-1)*np.abs(carrier.get_if()))
-            sa.set_nop(num_sidebands)
-            sa.set_detector('POS')
-            sa.set_res_bw(res_bw)
-            sa.set_video_bw(video_bw)
-            #sa.set_trigger_mode('CONT')
-            sa.set_sweep_time_auto(1)
+        if self.no_calibration:
+            solution = [0.5, 0]
+            score = 1e-10
         else:
-            sa.set_detector('rms')
-            sa.set_res_bw(res_bw)
-            sa.set_video_bw(video_bw)
-            sa.set_span(res_bw)
-            if hasattr(sa, 'set_nop'):
-                res_bw = 1e6
-                video_bw = 2e2
-                sa.set_sweep_time(50e-3)
-                sa.set_nop(1)
+            from scipy.optimize import fmin
+            #import time
+            res_bw = 4e6
+            video_bw = 1e3
 
-        self.lo.set_status(True)
+            self.calibration_switch_setter()
 
-        self.awg_I.run()
-        self.awg_Q.run()
-        sign = 1 if carrier.get_if()>0 else -1
-        solution = [-0.5, 0.2]
-        print (carrier.get_if(), carrier.frequency)
-        for iter_id in range(1):
-            def tfunc(x):
-                #dc = x[0] + x[1]*1j
-                target_sideband_id = 1 if carrier.get_if()>0 else -1
-                sideband_ids = np.asarray(np.linspace(-(num_sidebands-1)/2, (num_sidebands-1)/2, num_sidebands), dtype=int)
-                I =  0.4
-                Q =  x[0] + x[1]*1j
-                max_amplitude = self._set_if_cw(self.calib_dc()['dc'], I, Q, carrier.get_if(), half_length)
-                if max_amplitude < 1:
-                    clipping = 0
-                else:
-                    clipping = (max_amplitude-1)
-                # if we can measure all sidebands in a single sweep, do it
-                if hasattr(sa, 'set_nop') and use_single_sweep:
-                    result = sa.measure()['Power'].ravel()
-                else:
-                    # otherwise, sweep through each sideband
-                    result = []
-                    for sideband_id in range(num_sidebands):
-                        sa.set_centerfreq(self.lo.get_frequency()+(sideband_id-(num_sidebands-1)/2.)*np.abs(carrier.get_if()))
+            if hasattr(sa, 'set_nop') and use_single_sweep:
+                sa.set_centerfreq(self.lo.get_frequency())
+                sa.set_span((num_sidebands-1)*np.abs(carrier.get_if()))
+                sa.set_nop(num_sidebands)
+                sa.set_detector('POS')
+                sa.set_res_bw(res_bw)
+                sa.set_video_bw(video_bw)
+                #sa.set_trigger_mode('CONT')
+                sa.set_sweep_time_auto(1)
+            else:
+                sa.set_detector('rms')
+                sa.set_res_bw(res_bw)
+                sa.set_video_bw(video_bw)
+                sa.set_span(res_bw)
+                if hasattr(sa, 'set_nop'):
+                    res_bw = 1e6
+                    video_bw = 2e2
+                    sa.set_sweep_time(50e-3)
+                    sa.set_nop(1)
+
+            self.lo.set_status(True)
+
+            self.awg_I.run()
+            self.awg_Q.run()
+            sign = 1 if carrier.get_if()>0 else -1
+            solution = [-0.5, 0.2]
+            print (carrier.get_if(), carrier.frequency)
+            for iter_id in range(1):
+                def tfunc(x):
+                    #dc = x[0] + x[1]*1j
+                    target_sideband_id = 1 if carrier.get_if()>0 else -1
+                    sideband_ids = np.asarray(np.linspace(-(num_sidebands-1)/2, (num_sidebands-1)/2, num_sidebands), dtype=int)
+                    I =  0.5
+                    Q =  x[0] + x[1]*1j
+                    max_amplitude = self._set_if_cw(self.calib_dc()['dc'], I, Q, carrier.get_if(), half_length)
+                    if max_amplitude < 1:
+                        clipping = 0
+                    else:
+                        clipping = (max_amplitude-1)
+                    # if we can measure all sidebands in a single sweep, do it
+                    if hasattr(sa, 'set_nop') and use_single_sweep:
+                        result = sa.measure()['Power'].ravel()
+                    else:
+                        # otherwise, sweep through each sideband
+                        result = []
+                        for sideband_id in range(num_sidebands):
+                            sa.set_centerfreq(self.lo.get_frequency()+(sideband_id-(num_sidebands-1)/2.)*np.abs(carrier.get_if()))
+                            #time.sleep(0.1)
+                            #result.append(np.log10(np.sum(10**(sa.measure()['Power']/10)))*10)
+                            result.append(np.log10(np.sum(10**(sa.measure()['Power']/10)))*10)
                         #time.sleep(0.1)
-                        #result.append(np.log10(np.sum(10**(sa.measure()['Power']/10)))*10)
-                        result.append(np.log10(np.sum(10**(sa.measure()['Power']/10)))*10)
-                    #time.sleep(0.1)
-                    result = np.asarray(result)
-                if use_central:
-                    bad_sidebands = sideband_ids != target_sideband_id
-                else:
-                    bad_sidebands = np.logical_and(sideband_ids != target_sideband_id, sideband_ids != 0)
-                bad_power = np.sum(10**((result[bad_sidebands])/20))
-                good_power = np.sum(10**((result[sideband_ids==target_sideband_id])/20))
-                bad_power_dbm = np.log10(bad_power)*20
-                good_power_dbm = np.log10(good_power)*20
-                print('\rdc: {0: 4.2e}\tI: {1: 4.2e}\tQ:{2: 4.2e}\t'
-                      'B: {3:4.2f} G: {4:4.2f}, C:{5:4.2f}'.format(self.calib_dc()['dc'], I, Q,
-                                                                   bad_power_dbm, good_power_dbm, clipping)+str(result),
-                      end="")
-                return -good_power/bad_power+np.abs(good_power/bad_power)*10*clipping
-            #solution = fmin(tfunc, solution, maxiter=75, xtol=2**(-13))
-            solution = fmin(tfunc, solution, maxiter=40, xtol=2**(-12))
-            num_sidebands = num_sidebands_final
-            use_central = True
+                        result = np.asarray(result)
+                    if use_central:
+                        bad_sidebands = sideband_ids != target_sideband_id
+                    else:
+                        bad_sidebands = np.logical_and(sideband_ids != target_sideband_id, sideband_ids != 0)
+                    bad_power = np.sum(10**((result[bad_sidebands])/20))
+                    good_power = np.sum(10**((result[sideband_ids==target_sideband_id])/20))
+                    bad_power_dbm = np.log10(bad_power)*20
+                    good_power_dbm = np.log10(good_power)*20
+                    print('\rdc: {0: 4.2e}\tI: {1: 4.2e}\tQ:{2: 4.2e}\t'
+                          'B: {3:4.2f} G: {4:4.2f}, C:{5:4.2f}'.format(self.calib_dc()['dc'], I, Q,
+                                                                       bad_power_dbm, good_power_dbm, clipping)+str(result),
+                          end="")
+                    return -good_power/bad_power+np.abs(good_power/bad_power)*10*clipping
+                #solution = fmin(tfunc, solution, maxiter=75, xtol=2**(-13))
+                solution = fmin(tfunc, solution, maxiter=40, xtol=2**(-12))
+                num_sidebands = num_sidebands_final
+                use_central = True
 
-            #sa.set_centerfreq(self.lo.get_frequency())
-            #sa.set_nop(num_sidebands)
-            #sa.set_span((num_sidebands-1)*np.abs(arrier.get_if()))
-            #sa.set_detector('POS')
-            #self.set_trigger_mode('CONT')
-            #res_bw = 1e5
-            #video_bw = 1e4
-            #sa.set_res_bw(res_bw)
-            #sa.set_video_bw(video_bw)
-            #sa.set_sweep_time_auto(1)
-            #use_single_sweep = True
+                #sa.set_centerfreq(self.lo.get_frequency())
+                #sa.set_nop(num_sidebands)
+                #sa.set_span((num_sidebands-1)*np.abs(arrier.get_if()))
+                #sa.set_detector('POS')
+                #self.set_trigger_mode('CONT')
+                #res_bw = 1e5
+                #video_bw = 1e4
+                #sa.set_res_bw(res_bw)
+                #sa.set_video_bw(video_bw)
+                #sa.set_sweep_time_auto(1)
+                #use_single_sweep = True
 
-            score = tfunc(solution)
+                score = tfunc(solution)
 
         self.rf_calibrations[self.rf_cname(carrier)] = {'I': 0.5,
                                                         'Q': solution[0]+solution[1]*1j,
@@ -524,45 +523,49 @@ class Awg_iq_multi:
 
     def _calibrate_zero_sa(self, sa):
         """Performs IQ mixer calibration for DC signals at the I and Q inputs."""
-        import time
-        from scipy.optimize import fmin
-        print(self.lo.get_frequency())
-
-        self.calibration_switch_setter()
-
-        res_bw = 4e6
-        video_bw = 2e2
-        sa.set_res_bw(res_bw)
-        sa.set_video_bw(video_bw)
-        sa.set_detector('rms')
-        sa.set_centerfreq(self.lo.get_frequency())
-        sa.set_sweep_time(50e-3)
-        #time.sleep(0.1)
-        if hasattr(sa, 'set_nop'):
-            sa.set_span(0)
-            sa.set_nop(1)
-        #self.set_trigger_mode('CONT')
+        if self.no_calibration:
+            solution = [0 ,0]
+            score = 1e-10
         else:
-            sa.set_span(res_bw)
-        self.lo.set_status(True)
-        def tfunc(x):
-            self.awg_I.stop()
-            self.awg_Q.stop()
-            self._set_dc(x[0]+x[1]*1j)
-            self.awg_I.run()
-            self.awg_Q.run()
-            if hasattr(sa, 'set_nop'):
-                result = sa.measure()['Power'].ravel()[0]
-            else:
-                #result = np.log10(np.sum(10**(sa.measure()['Power']/10)))*10
-                result = np.log10(np.sum(sa.measure()['Power']))*10
-            print (x, result)
-            return result
+            import time
+            from scipy.optimize import fmin
+            print(self.lo.get_frequency())
 
-        #solution = fmin(tfunc, [0.3,0.3], maxiter=30, xtol=2**(-14))
-        solution = fmin(tfunc, [0.1,0.1], maxiter=50, xtol=2**(-13))
-        x = self.clip_dc(solution[0]+1j*solution[1])
-        self.zero = x
+            self.calibration_switch_setter()
+
+            res_bw = 4e6
+            video_bw = 2e2
+            sa.set_res_bw(res_bw)
+            sa.set_video_bw(video_bw)
+            sa.set_detector('rms')
+            sa.set_centerfreq(self.lo.get_frequency())
+            sa.set_sweep_time(50e-3)
+            #time.sleep(0.1)
+            if hasattr(sa, 'set_nop'):
+                sa.set_span(0)
+                sa.set_nop(1)
+            #self.set_trigger_mode('CONT')
+            else:
+                sa.set_span(res_bw)
+            self.lo.set_status(True)
+            def tfunc(x):
+                self.awg_I.stop()
+                self.awg_Q.stop()
+                self._set_dc(x[0]+x[1]*1j)
+                self.awg_I.run()
+                self.awg_Q.run()
+                if hasattr(sa, 'set_nop'):
+                    result = sa.measure()['Power'].ravel()[0]
+                else:
+                    #result = np.log10(np.sum(10**(sa.measure()['Power']/10)))*10
+                    result = np.log10(np.sum(sa.measure()['Power']))*10
+                print (x, result)
+                return result
+
+            #solution = fmin(tfunc, [0.3,0.3], maxiter=30, xtol=2**(-14))
+            solution = fmin(tfunc, [0.1,0.1], maxiter=50, xtol=2**(-13))
+            x = self.clip_dc(solution[0]+1j*solution[1])
+            self.zero = x
 
         self.dc_calibrations[self.dc_cname()] = {'dc': solution[0]+solution[1]*1j}
 

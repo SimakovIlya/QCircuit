@@ -40,12 +40,12 @@ pulsed_settings = {'lo1_power': 18,
                    'lo1_freq': 3.3e9,#3.70e9,
                    'pna_freq': 6.06e9,
                    #'calibrate_delay_nop': 65536,
-                   'calibrate_delay_nums': 200,
+                   'calibrate_delay_nums': 4,
                    'trigger_readout_channel_name': 'ro_trg',
-                   'trigger_readout_length': 200e-9,
+                   'trigger_readout_length': 10e-9,
                    'modem_dc_calibration_amplitude': 1.0,
-                   'adc_nop': 1024,
-                   'adc_nums': 10000,  ## Do we need control over this? Probably, but not now... WUT THE FUCK MAN
+                   'adc_nop': 512,
+                   'adc_nums': 10,  ## Do we need control over this? Probably, but not now... WUT THE FUCK MAN
                    }
 
 
@@ -70,51 +70,56 @@ class hardware_setup():
         self.iq_devices = None
 
     def open_devices(self):
+        # сама схема
+        C = 5*10**(-14)
+        Ij = 40*e**3/hbar/C
+        L = 2 * 10**(-8)
+        M = 2 * 10**(-8)
+        #I = 1.72 * 10**(-8)
+        dt = 0.01
 
-    	C = 5*10**(-14)
-		Ij = 40*e**3/hbar/C
-		L = 2 * 10**(-8)
-		M = 2 * 10**(-8)
-		#I = 1.72 * 10**(-8)
-		Time = 200
-		dt = 0.01
-		nums = 2
+        transmon = Transmon(psi = [1, 0], C = C, Ij1 = Ij, Ij2 = 0, M = 0)
+        coupling = Coupling(C /60)
+        n_osc = 6
+        alpha = 0
+        gamma = 0.02
+        osc = Oscillator(psi= np.exp(-alpha**2/2)*alpha**np.arange(n_osc)/np.sqrt(scipy.special.factorial(np.arange(n_osc))),\
+                         L = L, C = C/1., gamma = gamma, noise = 1)
+        drive_osc = InSignal()
+        drive_tr = InSignal()
+        circuit = Circuit([transmon, coupling, osc, drive_osc, drive_tr],  [[1, 4], [0, 2], [1], [2], [0]], dt = dt)
 
-		transmon = Transmon(psi = [1, 0], C = C, Ij1 = Ij, Ij2 = 0, M = 0)
-		coupling = Coupling(C /60)
-		alpha = 1
-		n_osc = 6
-		gamma = 0.01
-		osc = Oscillator(psi= np.exp(-alpha**2/2)*alpha**np.arange(n_osc)/np.sqrt(scipy.special.factorial(np.arange(n_osc))),\
-		                 L = L, C = C/1., gamma = gamma, noise = 1)
-		drive_osc = InSignal()
-		circuit = Circuit([transmon, coupling, osc, drive_osc],  [[1], [0, 2], [1], [2]], dt = dt)
+        # paraments
+        A = 1
+        I0 = 0.1
+        Q0 = -I0
+        fc = 4.5
+        fI = fQ = 0.5 #итоговый сигнал будет на fc+fI c маплитудой (I0-Q0)/2 и аналогичен -cos поданному сразу
 
-		insignal = InSignal()
 
-		lo = LO(insignal)
-		lo_m = LO(insignal)
-		awg = AWG(insignal)
-		mi = MI()
-		mi.set_circuit(circuit)
-		mi.set_lo(lo_m)
+        lo = LO(drive_osc)
+        lo.set_frequency(fc)
+        lo.set_power(1.)
+        awg_osc = AWG(drive_osc)
+        awg_tr =AWG(drive_tr)
+        lo_m = LO(drive_osc)
+        lo_m.set_frequency(fc)
+        lo_m.set_power(1.)
+        mi = MI()
+        mi.set_circuit(drive_osc)
+        mi.set_lo(lo_m)
+        mi.set_circuit(circuit)
 
-		# paraments
-		A = 1
-		I0 = 0.3
-		Q0 = -0.3
-		fc = 10
-		fI = fQ = 2
+        # подача сигналов
+        
+        self.lo1 = lo
+        self.awg = awg_tr
+        self.awg_osc = awg_osc
+        self.pna = lo_m
+        self.adc = mi
 
-		# подача сигналов
-		
-		self.lo1 = lo
-		self.awg = awg
-		self.pna = lo_m
-		self.adc = mi
-		self.awg_mi = mi
-		lo.set_frequency(fc)
-		lo.set_power(1.)
+        lo.set_frequency(fc)
+        lo.set_power(1.)
 
         #self.sa = Agilent_N9030A('pxa', address=self.device_settings['sa_address'])
 
@@ -134,9 +139,11 @@ class hardware_setup():
         self.pna.set_frequency(self.pulsed_settings['pna_freq'])
 
         self.awg.set_clock(self.pulsed_settings['ex_clock'])
+        self.awg_osc.set_clock(self.pulsed_settings['ex_clock'])
 
         self.adc.set_nop(self.pulsed_settings['adc_nop'])
         self.adc.set_nums(self.pulsed_settings['adc_nums'])
+        self.adc.set_clock(self.pulsed_settings['ex_clock'])
 
         # setting repetition period for slave devices
         # 'global_num_points_delay' is needed to verify that M3202A and other slave devices will be free
@@ -146,12 +153,15 @@ class hardware_setup():
                 'global_num_points_delta']))
 
         # global_num_points = 20000
-
+        print(global_num_points)
         self.awg.set_nop(global_num_points)
+        self.awg_osc.set_nop(global_num_points)
 
         # а вот длину сэмплов, которая очевидно то же самое, нужно задавать на всех авгшках.
         # хорошо, что сейчас она только одна.
-        # this is zashkvar   WUT THE FUCK MAN
+        # this is zashkvar   WUT THE FUCK 
+        self.ro_trg = awg_digital.awg_digital(self.adc, 1, delay_tolerance=20e-9)  # triggers readout card
+        self.ro_trg.mode = 'waveform'
 
     def set_switch_if_not_set(self, value, channel):
         pass
@@ -159,7 +169,9 @@ class hardware_setup():
     def setup_iq_channel_connections(self, exdir_db):
         # промежуточные частоты для гетеродинной схемы new:
         self.iq_devices = {'iq_ex1': awg_iq_multi.Awg_iq_multi(self.awg, self.awg, 0, 1, self.lo1, exdir_db=exdir_db),
-                           'iq_ro': awg_iq_multi.Awg_iq_multi(self.awg_mi, self.awg_mi, 0, 1, self.pna, exdir_db=exdir_db)}  # M3202A
+                           'iq_ro': awg_iq_multi.Awg_iq_multi(self.awg_osc, self.awg_osc, 0, 1, self.pna, exdir_db=exdir_db)}  # M3202A
+        self.iq_devices['iq_ex1'].no_calibration = True
+        self.iq_devices['iq_ro'].no_calibration = True
         # iq_pa = awg_iq_multi.Awg_iq_multi(awg_tek, awg_tek, 3, 4, lo_ro) #M3202A
         self.iq_devices['iq_ex1'].name = 'ex1'
         # iq_pa.name='pa'
@@ -172,7 +184,7 @@ class hardware_setup():
         self.iq_devices['iq_ro'].sa = self.sa
 
         self.fast_controls = {#'coil': awg_channel.awg_channel(self.hdawg, 4)
-        						}  # coil control
+                    }  # coil control
 
     def get_readout_trigger_pulse_length(self):
         return self.pulsed_settings['trigger_readout_length']

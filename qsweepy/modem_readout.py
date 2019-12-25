@@ -79,6 +79,7 @@ class modem_readout(data_reduce.data_reduce):
         seq = self.trigger_daq_seq + [
             self.pulse_sequencer.p(ex_channel_name, len(dac_sequence) / ex_channel.get_clock(),
                                    self.pulse_sequencer.awg, dac_sequence)]
+        print (len(dac_sequence), ex_channel.get_clock())
         self.pulse_sequencer.set_seq(seq)
         # readout
         adc_sequence = np.mean(self.adc.measure()[self.src_meas], axis=self.axis_mean)

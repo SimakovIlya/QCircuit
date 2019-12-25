@@ -29,9 +29,15 @@ class pulses:
         self.channels = channels
         self.settings = {}
 
-        self.initial_delay = 1e-6
-        self.final_delay = 1e-6
+        self.set_initial_delay(0)
+        self.set_final_delay(0)
+
+    def set_initial_delay(self, length):
+        self.initial_delay = length
         self.global_pre = [self.p(None, self.initial_delay, None)]
+
+    def set_final_delay(self, length):
+        self.final_delay = length
         self.global_post = [self.p(None, self.final_delay, None)]
 
     ## generate waveform of a gaussian pulse with quadrature phase mixin
@@ -182,10 +188,11 @@ class pulses:
                 pulse_shape[channel] = np.asarray(pulse_shape[channel])
 
                 if len(pulse_shape[channel]) > channel_device.get_nop():
+                    raise (ValueError('pulse sequence too long, got {}, channel nop is {}'.format(
+                        len(pulse_shape[channel]), channel_device.get_nop())))
                     tmp = np.zeros(channel_device.get_nop(), dtype=pulse_shape[channel].dtype)
                     tmp = pulse_shape[channel][-channel_device.get_nop():]
                     pulse_shape[channel] = tmp
-                    raise (ValueError('pulse sequence too long'))
                 else:
                     tmp = np.zeros(channel_device.get_nop(), dtype=pulse_shape[channel].dtype)
                     tmp[-len(pulse_shape[channel]):] = pulse_shape[channel]
