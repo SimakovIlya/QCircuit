@@ -55,8 +55,10 @@ def measurer_point_parameters(measurer):
     """
     point_parameters = {}
     for dataset_name, points in measurer.get_points().items():
+        print('dataset_name', dataset_name)
         point_parameters[dataset_name] = []
         for dimension in points:
+            #print('dimension' ,dimension)
             name, values, unit = dimension
             point_parameters[dataset_name].append(MeasurementParameter(values, None, name, unit))
     return point_parameters

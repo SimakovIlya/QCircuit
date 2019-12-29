@@ -18,6 +18,11 @@ class data_reduce:
 			self.post_sweep = self.source.post_sweep
 		
 	def get_points(self):
+		print('you are here')
+		print(self.filters.__class__)
+		print(self.filters)
+		print(self.filters['bg'].__class__)
+		print(len(self.filters['bg']['get_points']()))
 		return { filter_name:filter['get_points']() for filter_name, filter in self.filters.items()}
 	
 	def get_dtype(self):
@@ -116,8 +121,12 @@ def cross_section_reducer(source, src_meas, axis, index):
 def mean_reducer(source, src_meas, axis):
 	def get_points():
 		new_axes = source.get_points()[src_meas].copy()
+		print('you are here now')
+		print('new_axes', len(new_axes))
 		del new_axes [axis]
+		print('new_axes', len(new_axes))
 		return new_axes
+	print('src_meas', src_meas)
 	filter = {'filter': lambda x:np.mean(x[src_meas], axis=axis),
 			  'get_points': get_points,
 			  'get_dtype': (lambda : complex if source.get_dtype()[src_meas] is complex else float),

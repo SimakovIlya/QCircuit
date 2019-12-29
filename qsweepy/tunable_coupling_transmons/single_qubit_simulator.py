@@ -160,7 +160,7 @@ class hardware_setup():
         # а вот длину сэмплов, которая очевидно то же самое, нужно задавать на всех авгшках.
         # хорошо, что сейчас она только одна.
         # this is zashkvar   WUT THE FUCK 
-        self.ro_trg = awg_digital.awg_digital(self.adc, 1, delay_tolerance=20e-9)  # triggers readout card
+        self.ro_trg = awg_digital.awg_digital(self.adc, 1, delay_tolerance=21e-9)  # triggers readout card
         self.ro_trg.mode = 'waveform'
 
     def set_switch_if_not_set(self, value, channel):
